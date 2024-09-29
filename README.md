@@ -1,65 +1,129 @@
-# kafka-jmx-grafana-docker
+# task3_scenario1
 
-Docker-compose file for Confluent Kafka with configuration mounted as properties files. Brings up Kafka and components with JMX metrics exposed and visualized using Prometheus and Grafana
+Kafka Connect Cluster Super User Issue Resolution
 
-## Start
+Problem Statement:
 
-```
-docker-compose up -d
-```
-
-## Usage
-
-The docker-compose file brings up 3 node kafka cluster with security enabled. Each service in the compose file has its properties/configurations mounted as a volume from a directory with the same name as the service.
-
-Check the kafka server.properties for more details about the Kafka setup.
-
-### Health
-
-Check if all components are up and running using
-
-```bash
-docker-compose ps -a
-# Ensure there are no Exited services and all containers have the status `Up`
-```
+After a recent security audit, certain users were removed from the super.users list in the Kafka broker's server.properties file. This resulted in the Kafka Connect cluster appearing down on Confluent Control Center (localhost:9021).
 
 
-### Client
+The goal is to troubleshoot and securely resolve the issue by updating the super.users list and restarting the Kafka services.
 
-To use a kafka client, exec into the `kfkclient` container which contains the Kafka CLI and other tools necessary for troubleshooting Kafka. THe `kfkclient` container also contains a properties file mounted to `/opt/client`, which can be used to define the client properties for communicating with Kafka.
+Prerequisites
 
-```
-docker exec -it kfkclient bash
-```
+    Access to Kafka brokers: SSH or direct access to the Kafka broker nodes.
+    Administrative access to the Confluent Control Center.
+    Kafka and Confluent Platform installed and running.
 
-### Logs
+Steps to Resolve
 
-Check the logs of the respective service by its container name.
+Step 1: Check the Current Status
 
-```bash
-docker logs <container_name> # docker logs kafka1
-```
+Before troubleshooting, confirm that the Kafka Connect cluster is down in the Confluent Control Center on localhost:9021.
 
-### Restarting services
+    Open a browser and go to http://localhost:9021.
+    Navigate to the Connect tab.
+    Verify that the Connect cluster is shown as unavailable or down.
 
-To restart a particular service - 
+Before Troubleshooting Screenshot:
 
-```bash
-docker-compose restart <service_name> # docker-compose restart kafka1
-# OR
-docker-compose up -d --force-recreate <service_name> # docker-compose up -d --force-recreate kafka1
-```
+![alt text](<images/Screenshot from 2024-09-23 22-12-47.png>)
 
-# Scenario 1
+Step 2: SSH into Kafka Broker Nodes
+SSH into all the Kafka brokers in your cluster (Kafka1, Kafka2, Kafka3). Use the following commands for each broker.
 
-> **Before starting ensure that there are no other versions of the sandbox running**
-> Run `docker-compose down -v` before starting
+    ssh user@kafka1_ip_address
+    ssh user@kafka2_ip_address
+    ssh user@kafka3_ip_address
 
-1. Start the scenario with `docker-compose up -d`
-2. Wait for all services to be up and healthy `docker-compose ps`
+Step 3: Modify server.properties File
 
-## Problem Statement
+For each Kafka broker, update the server.properties file to include the correct super users.
 
-The client notices that the connect cluster is down on control-center(localhost:9021). This is after an security audit removed some users from the super users list.
+    Open the server.properties file on each broker:
 
-Troubleshoot and provide a secure solution for the client.
+        sudo nano /path/to/kafka/config/server.properties
+
+    Locate the super.users property and update it as follows:
+
+        super.users=User:bob;User:kafka1;User:kafka2;User:kafka3;User:mds;User:schemaregistryUser;User:controlcenterAdmin;User:connectAdmin
+
+    Save and exit the file after making changes (Ctrl + X, then Y to confirm changes).
+
+Step 4: Restart Kafka Brokers
+
+After updating the server.properties file on each broker, restart the Kafka services for the changes to take effect.
+
+    Restart each Kafka broker:
+
+        sudo systemctl restart confluent-kafka
+
+    Check the status of each broker:
+
+        sudo systemctl status confluent-kafka
+
+Step 5: Restart Kafka Connect and Control Center
+
+After updating the Kafka brokers, restart the Kafka Connect service and Confluent Control Center.
+
+    Restart Kafka Connect:
+
+        sudo systemctl restart confluent-kafka-connect
+
+    Restart Control Center:
+
+        sudo systemctl restart confluent-control-center
+
+    Check the status of both services:
+
+        sudo systemctl status confluent-kafka-connect
+        sudo systemctl status confluent-control-center
+
+Step 6: Verify the Changes
+Once the services are restarted, verify that the Kafka Connect cluster is back online in Confluent Control Center.
+
+    Open a browser and go to http://localhost:9021.
+    Navigate to the Connect tab.
+    Confirm that the Connect cluster is now available.
+
+After Troubleshooting Screenshot:
+
+![alt text](<images/Screenshot from 2024-09-23 22-18-19.png>)
+
+Step 7: Validate the Security Configuration
+
+After resolving the issue, check the Kafka logs to ensure there are no permission-related errors and that all necessary services are functioning with the updated super.users list.
+
+    tail -f /path/to/kafka/logs/server.log
+
+
+
+Before and After Troubleshooting
+
+
+Before:
+
+    The Kafka Connect cluster is shown as down or unavailable in Confluent Control Center (localhost:9021).
+    Error logs in the Connect service may indicate permission issues due to missing super users.
+
+Before Troubleshooting Screenshot:
+
+![alt text](<images/Screenshot from 2024-09-23 22-12-47.png>)
+
+
+After:
+    The Kafka Connect cluster is up and running in Confluent Control Center (localhost:9021).
+    No permission-related errors appear in the Kafka and Connect logs.
+
+After Troubleshooting Screenshot:
+
+![alt text](<images/Screenshot from 2024-09-23 22-18-19.png>)
+![alt text](<images/Screenshot from 2024-09-23 22-18-25.png>)
+![alt text](<images/Screenshot from 2024-09-23 23-12-07.png>)
+
+
+
+
+
+
+
