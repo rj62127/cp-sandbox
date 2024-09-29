@@ -1,79 +1,140 @@
-# kafka-jmx-grafana-docker
+# task3_scenario3
 
-Docker-compose file for Confluent Kafka with configuration mounted as properties files. Brings up Kafka and components with JMX metrics exposed and visualized using Prometheus and Grafana
+Kafka Cluster Authentication Issue and Solution
 
-## Start
+Problem Statement:
 
-```
-docker-compose up -d
-```
+The client, using the superuser bob with the password bob-secret, is unable to interact with certain Kafka brokers (kafka2 and kafka3) when using the following Kafka tools:
 
-## Usage
+    kafka-topics
+    kafka-console-producer
+    kafka-console-consumer
 
-The docker-compose file brings up 3 node kafka cluster with security enabled. Each service in the compose file has its properties/configurations mounted as a volume from a directory with the same name as the service.
+Although the kafka1 broker works correctly as the bootstrap server, an error occurs when trying to use kafka2 or kafka3 as the bootstrap server. The following error message is encountered:
 
-Check the kafka server.properties for more details about the Kafka setup.
-
-### Health
-
-Check if all components are up and running using
-
-```bash
-docker-compose ps -a
-# Ensure there are no Exited services and all containers have the status `Up`
-```
+    [2023-07-26 13:20:58,720] ERROR [AdminClient clientId=adminclient-1] Connection to node 3 (kafka3/192.168.112.8:39092) failed authentication due to: Authentication failed: Invalid username or password (org.apache.kafka.clients.NetworkClient)
+    [2023-07-26 13:20:58,722] WARN [AdminClient clientId=adminclient-1] Metadata update failed due to authentication error (org.apache.kafka.clients.admin.internals.AdminMetadataManager)
+    org.apache.kafka.common.errors.SaslAuthenticationException: Authentication failed: Invalid username or password
+    Error while executing topic command : Authentication failed: Invalid username or password
 
 
-### Client
+Root Cause
 
-To use a kafka client, exec into the `kfkclient` container which contains the Kafka CLI and other tools necessary for troubleshooting Kafka. THe `kfkclient` container also contains a properties file mounted to `/opt/client`, which can be used to define the client properties for communicating with Kafka.
+    The issue was traced to incorrect SSL configuration and a misconfiguration in the server.properties file on the kafka2 and kafka3 brokers. The password for the superuser bob was incorrectly set in the server configuration files.
 
-```
-docker exec -it kfkclient bash
-```
+Incorrect line in server.properties for kafka2 and kafka3:
 
-### Logs
+    user_bob="b0b-secret"
 
-Check the logs of the respective service by its container name.
+Correct line:
 
-```bash
-docker logs <container_name> # docker logs kafka1
-```
+    user_bob="bob-secret"
 
-### Restarting services
+This typo caused the Kafka clients to fail authentication, leading to the "Invalid username or password" error.
 
-To restart a particular service - 
 
-```bash
-docker-compose restart <service_name> # docker-compose restart kafka1
-# OR
-docker-compose up -d --force-recreate <service_name> # docker-compose up -d --force-recreate kafka1
-```
+Solution:
 
-# Scenario 3
+Step 1: Configure SSL for Kafka Brokers
 
-> **Before starting ensure that there are no other versions of the sandbox running**
-> Run `docker-compose down -v` before starting
+    1.1. Create a CA (Certificate Authority)
 
-1. Start the scenario with `docker-compose up -d`
-2. Wait for all services to be up and healthy `docker-compose ps`
+    First, create a new CA key and certificate:
 
-## Problem Statement
+        openssl req -new -x509 -days 365 -keyout ca-key -out ca-cert -subj "/C=DE/ST=NRW/L=MS/O=juplo/OU=kafka/CN=Root-CA" -passout pass:kafka-broker
 
-The client is unable to interact with the cluster using `kafka-topics`, `kafka-console-producer` or `kafka-console-consumer` using the super user `bob`(password - `bob-secret`) with some of the kakfa brokers as the bootstrap server. Only one of the kafka broker works as the bootstrap server.
+    1.2. Create a Truststore and Import the CA Certificate
 
-The error message when using kafka2 or kafka3 as the bootstrap-server
+    For each Kafka broker, create a truststore and import the CA certificate into it:
 
-```
-[2023-07-26 13:20:58,720] ERROR [AdminClient clientId=adminclient-1] Connection to node 3 (kafka3/192.168.112.8:39092) failed authentication due to: Authentication failed: Invalid username or password (org.apache.kafka.clients.NetworkClient)
-[2023-07-26 13:20:58,722] WARN [AdminClient clientId=adminclient-1] Metadata update failed due to authentication error (org.apache.kafka.clients.admin.internals.AdminMetadataManager)
-org.apache.kafka.common.errors.SaslAuthenticationException: Authentication failed: Invalid username or password
-Error while executing topic command : Authentication failed: Invalid username or password
-[2023-07-26 13:20:58,907] ERROR org.apache.kafka.common.errors.SaslAuthenticationException: Authentication failed: Invalid username or password
-```
+        keytool -keystore kafka.server.truststore.jks -storepass kafka-broker -import -alias ca-root -file ca-cert -noprompt
 
-Commands ran on the `kfkclient` host
+    1.3. Create a Keystore and Private Key
 
-```bash
-kafka-topics --bootstrap-server <broker>:<port> --command-config /opt/client/client.properties --list
-```
+    Generate a new keystore and private key for each Kafka broker:
+
+        keytool -keystore kafka.server.keystore.jks -storepass kafka-broker -alias kafka1 -validity 365 -keyalg RSA -genkeypair -keypass kafka-broker -dname "CN=kafka1,OU=kafka,O=juplo,L=MS,ST=NRW,C=DE"
+
+    1.4. Generate a Certificate Signing Request (CSR)
+
+    Create a CSR for the broker:
+
+        keytool -alias kafka1 -keystore kafka.server.keystore.jks -certreq -file cert-file -storepass kafka-broker -keypass kafka-broker
+
+    1.5. Sign the CSR with the CA
+
+    Sign the broker's CSR using the CA certificate:
+
+        openssl x509 -req -CA ca-cert -CAkey ca-key -in cert-file -out cert-signed -days 365 -CAcreateserial -passin pass:kafka-broker -extensions SAN -extfile <(printf "\n[SAN]\nsubjectAltName=DNS:kafka1,DNS:localhost")
+
+    1.6. Import the CA Certificate into the Keystore
+
+    Import the CA certificate into the broker's keystore:
+
+        keytool -importcert -keystore kafka.server.keystore.jks -alias ca-root -file ca-cert -storepass kafka-broker -keypass kafka-broker -noprompt
+
+    1.7. Import the Signed Certificate into the Keystore
+
+    Finally, import the signed certificate into the broker's keystore:
+
+        keytool -keystore kafka.server.keystore.jks -alias kafka1 -import -file cert-signed -storepass kafka-broker -keypass kafka-broker -noprompt
+
+
+Step 2: Correct the server.properties Files
+
+    Ensure that the user_bob password is correctly set in the server.properties files on kafka2 and kafka3.
+
+    Incorrect (old) line:
+
+        user_bob="b0b-secret"
+
+    Correct (new) line:
+
+        user_bob="bob-secret"
+
+
+Step 3: Run Docker-Compose and Test Kafka Brokers
+
+    After correcting the configuration and SSL setup, run the following commands to bring up the Kafka services and test the brokers:
+
+        Start Kafka Cluster using Docker Compose:
+
+            docker-compose up -d
+
+        Client:
+
+        To use a kafka client, exec into the kfkclient container which contains the Kafka CLI and other tools necessary for troubleshooting Kafka. THe kfkclient container also contains a properties file mounted to /opt/client, which can be used to define the client properties for communicating with Kafka.
+
+            docker exec -it kfkclient bash
+
+        Test Connection with Kafka Brokers: Use the following commands to list topics for each Kafka broker:
+
+            Kafka1 (Port: 19092):
+
+                kafka-topics --bootstrap-server kafka1:19092 --command-config /opt/client/client.properties --list
+
+            Kafka2 (Port: 29092):
+
+                kafka-topics --bootstrap-server kafka2:29092 --command-config /opt/client/client.properties --list
+
+            Kafka3 (Port: 39092):
+
+                kafka-topics --bootstrap-server kafka3:39092 --command-config /opt/client/client.properties --list
+
+
+Step 4: Verify Successful Authentication:
+
+    If everything is set up correctly, the topic list should appear without authentication errors, confirming that the SSL and password issues have been resolved.
+
+
+
+Results:
+
+![alt text](<images/Screenshot from 2024-09-24 15-44-49.png>)
+![alt text](<images/Screenshot from 2024-09-24 15-45-10.png>)
+![alt text](<images/Screenshot from 2024-09-24 15-46-30.png>)              
+![alt text](<images/Screenshot from 2024-09-24 15-46-36.png>)
+![alt text](<images/Screenshot from 2024-09-24 15-48-30.png>)
+![alt text](<images/Screenshot from 2024-09-24 15-48-36.png>)
+
+
