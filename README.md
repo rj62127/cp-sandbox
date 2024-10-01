@@ -192,7 +192,8 @@ Step-by-Step Solution
 
 
 Result After Troubleshooting
-By following these steps, the client should now be able to successfully produce and consume messages from the inventory_changes topic. The issue with the SASL/PLAIN over PLAINTEXT configuration has been resolved, and the Kafka cluster is functioning correctly.
+
+    By following these steps, the client should now be able to successfully produce and consume messages from the inventory_changes topic. The issue with the SASL/PLAIN over PLAINTEXT configuration has been resolved, and the Kafka cluster is functioning correctly.
 
 
 ![alt text](<Results/Screenshot from 2024-10-01 12-53-51.png>)
