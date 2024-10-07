@@ -248,4 +248,3 @@ services:
 volumes:
     prometheus_data: {}
     grafana_data: {}
-
