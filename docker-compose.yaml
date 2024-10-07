@@ -71,6 +71,26 @@ services:
           cpus: "1.5"
           memory: 1536M
 
+  connect:
+    image: confluentinc/cp-server-connect:7.4.0
+    hostname: connect
+    container_name: connect
+    depends_on:
+      - kafka1
+      - kafka2
+      - kafka3
+      - schema-registry
+    command: connect-distributed /etc/kafka/connect-distributed.properties
+    ports:
+      - "8083:8083"
+    volumes:
+    - ./connect:/etc/kafka
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2048M
+
   schema-registry:
     image: confluentinc/cp-schema-registry:7.4.0
     hostname: schema-registry
@@ -99,6 +119,7 @@ services:
       - kafka2
       - kafka3
       - schema-registry
+      #- connect
     ports:
       - "9021:9021"
     command: control-center-start /etc/confluent-control-center/control-center-production.properties
@@ -182,7 +203,7 @@ services:
       - kafka2
       - kafka3
     command: kafka-producer-perf-test \
-              --topic debit_transactions \
+              --topic debittransactions \
               --num-records 99999999999 \
               --throughput -1 \
               --record-size 10000 \
@@ -207,7 +228,7 @@ services:
       - kafka2
       - kafka3
     command: kafka-producer-perf-test \
-              --topic credit_transactions \
+              --topic credittransactions \
               --num-records 99999999999 \
               --throughput -1 \
               --record-size 10000 \
@@ -232,7 +253,7 @@ services:
       - kafka2
       - kafka3
     command: kafka-producer-perf-test \
-              --topic loan_payments \
+              --topic loanpayments \
               --num-records 99999999999 \
               --throughput -1 \
               --record-size 10000 \
@@ -257,7 +278,7 @@ services:
       - kafka2
       - kafka3
     command: kafka-producer-perf-test \
-              --topic new_accounts \
+              --topic newaccounts \
               --num-records 99999999999 \
               --throughput -1 \
               --record-size 10000 \
@@ -282,7 +303,7 @@ services:
       - kafka2
       - kafka3
     command: kafka-producer-perf-test \
-              --topic business_requests \
+              --topic businessrequests \
               --num-records 99999999999 \
               --throughput -1 \
               --record-size 10000 \
@@ -307,7 +328,7 @@ services:
       - kafka2
       - kafka3
     command: kafka-producer-perf-test \
-              --topic international_transactions \
+              --topic internationaltransactions \
               --num-records 99999999999 \
               --throughput -1 \
               --record-size 10000 \
@@ -332,7 +353,7 @@ services:
       - kafka2
       - kafka3
     command: kafka-producer-perf-test \
-              --topic account_audit \
+              --topic accountaudit \
               --num-records 99999999999 \
               --throughput -1 \
               --record-size 10000 \
@@ -357,7 +378,7 @@ services:
       - kafka2
       - kafka3
     command: kafka-producer-perf-test \
-              --topic fraud_detection \
+              --topic frauddetection \
               --num-records 99999999999 \
               --throughput -1 \
               --record-size 10000 \
