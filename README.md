@@ -1,63 +1,128 @@
-# kafka-jmx-grafana-docker
+Kafka Broker Metrics Troubleshooting
 
-Docker-compose file for Confluent Kafka with configuration mounted as properties files. Brings up Kafka and components with JMX metrics exposed and visualized using Prometheus and Grafana
+    This guide provides steps to troubleshoot an issue where broker metrics are not captured in Confluent Control Center, despite the setup of the Confluent Metrics Reporter. It also includes steps to generate custom SSL certificates for Kafka brokers and configure them accordingly.
 
-## Start
+Prerequisites
 
-```
-docker-compose up -d
-```
+Ensure no other versions of the sandbox are running.
 
-## Usage
+Run the following command to stop and remove any existing services:
 
-The docker-compose file brings up 3 node kafka cluster with security enabled. Each service in the compose file has its properties/configurations mounted as a volume from a directory with the same name as the service.
+    docker-compose down -v
 
-Check the kafka server.properties for more details about the Kafka setup.
+Starting the Scenario
 
-### Health
+    Start the required services:
 
-Check if all components are up and running using
+        docker-compose up -d
 
-```bash
-docker-compose ps -a
-# Ensure there are no Exited services and all containers have the status `Up`
-```
+    Wait for all services to be up and healthy:
+
+        docker-compose ps
 
 
-### Client
+Problem Statement
 
-To use a kafka client, exec into the `kfkclient` container which contains the Kafka CLI and other tools necessary for troubleshooting Kafka. THe `kfkclient` container also contains a properties file mounted to `/opt/client`, which can be used to define the client properties for communicating with Kafka.
+You might encounter an issue in Confluent Control Center that states:
 
-```
-docker exec -it kfkclient bash
-```
+    Please set up Confluent Metrics Reporter to view broker metrics.
 
-### Logs
+Although the Confluent Metrics Reporter is set up, broker metrics are not visible. Follow the troubleshooting steps below to resolve the issue.
 
-Check the logs of the respective service by its container name.
 
-```bash
-docker logs <container_name> # docker logs kafka1
-```
+Troubleshooting Steps
 
-### Restarting services
+Step 1: Create SSL Certificates for Kafka Brokers
 
-To restart a particular service - 
+    1.1 Create Your Own CA
 
-```bash
-docker-compose restart <service_name> # docker-compose restart kafka1
-# OR
-docker-compose up -d --force-recreate <service_name> # docker-compose up -d --force-recreate kafka1
-```
+    Generate a new CA key and certificate:
 
-# Scenario 21
+        openssl req -new -x509 -days 365 -keyout ca-key -out ca-cert -subj "/C=DE/ST=NRW/L=MS/O=juplo/OU=kafka/CN=Root-CA" -passout pass:kafka-broker
 
-> **Before starting ensure that there are no other versions of the sandbox running**
-> Run `docker-compose down -v` before starting
+    1.2 Create Truststore and Import Root CA
 
-1. Start the scenario with `docker-compose up -d`
-2. Wait for all services to be up and healthy `docker-compose ps`
+    Create a truststore for Kafka brokers and import the CA certificate:
 
-## Problem Statement
+        keytool -keystore kafka.server.truststore.jks -storepass kafka-broker -import -alias ca-root -file ca-cert -noprompt
 
-There are no broker metrics captured in the control center. The control center has a message - `Please set up Confluent Metrics Reporter to view broker metrics`. The customer has setup Confluent Metrics Reporter but is still unable to view broker metrics
+    1.3 Create Keystore for Kafka Broker
+
+    Generate a new keystore and private key for a Kafka broker:
+
+        keytool -keystore kafka.server.keystore.jks -storepass kafka-broker -alias kafka1 -validity 365 -keyalg RSA -genkeypair -keypass kafka-broker -dname "CN=kafka1,OU=kafka,O=juplo,L=MS,ST=NRW,C=DE"
+
+    1.4 Create Certificate Signing Request (CSR)
+
+    Generate a CSR for the broker:
+
+        keytool -alias kafka1 -keystore kafka.server.keystore.jks -certreq -file cert-file -storepass kafka-broker -keypass kafka-broker
+
+    1.5 Sign the CSR Using the CA
+
+    Sign the CSR with the CA certificate:
+
+        openssl x509 -req -CA ca-cert -CAkey ca-key -in cert-file -out cert-signed -days 365 -CAcreateserial -passin pass:kafka-broker -extensions SAN -extfile <(printf "\n[SAN]\nsubjectAltName=DNS:kafka1,DNS:localhost")
+
+    1.6 Import CA Certificate into Keystore
+
+    Import the CA certificate into the broker’s keystore:
+
+        keytool -importcert -keystore kafka.server.keystore.jks -alias ca-root -file ca-cert -storepass kafka-broker -keypass kafka-broker -noprompt
+
+    1.7 Import Signed Certificate into Keystore
+
+    Import the signed certificate into the broker’s keystore:
+
+        keytool -keystore kafka.server.keystore.jks -alias kafka1 -import -file cert-signed -storepass kafka-broker -keypass kafka-broker -noprompt
+
+
+Step 2: Update Kafka Broker Configuration
+
+Add the following properties to the server.properties file for each Kafka broker:
+
+    listeners=CLIENT://:19092,BROKER://:19093,TOKEN://:19094
+    advertised.listeners=CLIENT://kafka1:19092,BROKER://kafka1:19093,TOKEN://kafka1:19094
+    ssl.keystore.password=kafka-broker
+    listener.security.protocol.map=CLIENT:SASL_PLAINTEXT,BROKER:SSL,TOKEN:SASL_PLAINTEXT
+    confluent.metrics.reporter.bootstrap.servers=kafka1:19093,kafka2:29093,kafka3:39093
+    confluent.metrics.reporter.ssl.keystore.password=kafka-broker
+
+
+Step 3: Update Schema Registry Configuration
+
+In the Schema Registry configuration file (schema-registry.properties), add the following line:
+
+    kafkastore.bootstrap.servers=kafka1:19094,kafka2:29094,kafka3:39094
+
+
+Step 4: Restart Docker Services
+
+    Bring down all services:
+
+        docker-compose down -v
+
+    Start the services again:
+
+        docker-compose up -d
+
+    Wait for all services to be healthy:
+
+        docker-compose ps -a
+
+
+Verifying the Solution
+
+    After following the above steps, visit http://localhost:9021 in your browser to check if all services are healthy and broker metrics are visible in Confluent Control Center.
+
+![alt text](<images/Screenshot from 2024-10-01 15-01-43.png>)
+![alt text](<images/Screenshot from 2024-10-01 15-06-34.png>)
+![alt text](<images/Screenshot from 2024-10-01 15-06-44.png>)
+![alt text](<images/Screenshot from 2024-10-01 15-06-54.png>)
+![alt text](<images/Screenshot from 2024-10-01 15-07-01.png>)
+![alt text](<images/Screenshot from 2024-10-01 15-07-07.png>)
+![alt text](<images/Screenshot from 2024-10-01 15-07-29.png>)
+![alt text](<images/Screenshot from 2024-10-01 15-07-40.png>)
+
+
+
